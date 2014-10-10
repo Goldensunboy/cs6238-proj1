@@ -59,16 +59,14 @@ public class SecLogin implements Runnable {
 	 */
 	private BigInteger calculatePoly(BigInteger hpwd, int[] coeff, int x) {
 		BigInteger a0 = new BigInteger(hpwd.toString());
-		//System.out.println(a0);
+		System.out.println(a0);
 		for(int i = 1; i < DIST_FEAT_CNT; ++i) {
 			BigInteger xval = BigInteger.valueOf(x);
 			BigInteger aval = BigInteger.valueOf(coeff[i - 1]);
 			BigInteger b = xval.pow(i).multiply(aval);
-			System.out.println(a0);
-			a0.add(b);
-			System.out.println(a0);
+			a0 = a0.add(b);
 		}
-		//System.out.println(a0);
+		System.out.println(a0);
 		return a0;
 	}
 	
@@ -94,12 +92,12 @@ public class SecLogin implements Runnable {
 			// Create random vector
 			BigInteger q = new BigInteger(160, Integer.MAX_VALUE, new Random());
 			BigInteger hpwd = new BigInteger(256, Integer.MAX_VALUE, new Random()).mod(q);
-			int[] coefficients = new int[DIST_FEAT_CNT - 1];
+			int[] coeff = new int[DIST_FEAT_CNT - 1];
 			for(int i = 0; i < DIST_FEAT_CNT - 1; ++i) {
-				coefficients[i] = Math.abs(rand.nextInt());
+				coeff[i] = Math.abs(rand.nextInt());
 			}
 			
-			BigInteger y = calculatePoly(hpwd, coefficients, 2);
+			BigInteger y = calculatePoly(hpwd, coeff, 2);
 		}
 		
 		return true;
@@ -143,7 +141,9 @@ public class SecLogin implements Runnable {
 		
 		new Thread(new SecLogin(null)).start();
 		boolean b1 = false, b2 = false;
-		while(b1 == b2);
+		if(b1 == b2) {
+			return;
+		}
 		
 		// Initialize server socket to listen on a port
 		ServerSocket serverSocket = null;
