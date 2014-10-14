@@ -1,25 +1,39 @@
+import java.io.CharArrayWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.Scanner;
 import java.security.*;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.Mac;
+import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.SecretKeySpec;
 
 public class SecLogin implements Runnable {
 
 	/** Size of user history files */
-	private static final int HIST_SIZE = 20;
+	private static final int HIST_SIZE = 8 << 10; // 8KB
+	
+	/** Max h value for history of logins */
+	private static final int HIST_H = 20;
 
 	/** Number of distinguishing features per user */
 	private static final int DIST_FEAT_CNT = 15;
 
 	/** Random used for generating values */
 	private static Random rand = new Random();
+	
+	/** History file magic text */
+	private static final String HIST_TEXT = "This is a history file.";
 
 	/**
 	 * Calculate the polynomial given coefficients
@@ -62,10 +76,10 @@ public class SecLogin implements Runnable {
 			byte[] rawHmac = mac.doFinal(input.getBytes());
 			Alpha1 = new BigInteger(1,rawHmac);
 
-			System.out.println("Hash value is " +Alpha1);
+			System.out.println("Hash value is " + Alpha1);
 		}
 		catch (Exception e) {
-			System.out.println("Exception" + e);
+			e.printStackTrace();
 		}
 
 		Alpha1 = Alpha1.mod(q);
@@ -98,17 +112,30 @@ public class SecLogin implements Runnable {
 			System.out.println("encrypted string: " + test3 + "-" + output);
 		} 
 		catch (Exception e) {
-			System.out.println("Exception: "+e);
-		}		
-
+			e.printStackTrace();
+		}
 	}
 
+	static volatile boolean b__ = true;
+	
 	/**
 	 * Attempt to log in
 	 * @param credentials CSV of the login credentials and feature vector
 	 * @return Whether or not the user was authenticated
+	 * @throws NoSuchAlgorithmException 
+	 * @throws UnsupportedEncodingException 
+	 * @throws BadPaddingException 
+	 * @throws IllegalBlockSizeException 
+	 * @throws NoSuchPaddingException 
+	 * @throws InvalidKeyException 
 	 */
-	private boolean loginAttempt(String credentials) {
+	private boolean loginAttempt(String credentials) throws
+			NoSuchAlgorithmException,
+			IllegalBlockSizeException,
+			BadPaddingException,
+			UnsupportedEncodingException,
+			NoSuchPaddingException,
+			InvalidKeyException {
 
 		// Parse login string
 		String[] vals = credentials.split(" ");
@@ -126,7 +153,7 @@ public class SecLogin implements Runnable {
 
 
 		// If new user, do init
-		if(!new File(name + ".hist").exists()) {
+		if(!new File(name + ".hist").exists() || b__) {
 
 			// Create random vector
 			BigInteger q = new BigInteger(160, Integer.MAX_VALUE, new Random());
@@ -156,10 +183,41 @@ public class SecLogin implements Runnable {
 				Beta[i-1] = Beta1;
 			}
 
+			// Encrypt_Alpha_Beta(Alpha, Beta, password);
 
-			Encrypt_Alpha_Beta(Alpha, Beta, password);
-
+			// Create history file contents
+			CharArrayWriter caw = new CharArrayWriter(HIST_SIZE);
+			PrintWriter pw = new PrintWriter(caw), fw = null; // fw is our file writer to create history file on disk
+			pw.write(HIST_TEXT + "\n");
+			pw.write(1 + "\n");
+			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+				pw.write(features[i] + "\n");
+			}
+			FileWriter fw_intermediate = null;
+			try {
+				fw_intermediate = new FileWriter(name + ".hist");
+				fw = new PrintWriter(fw_intermediate);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			
+			// Encrypt history file contents
+			char[] hist_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE);
+			MessageDigest md = MessageDigest.getInstance("SHA1");
+			md.update(password.getBytes()); 
+			byte[] hist_key = md.digest();
+			hist_key = Arrays.copyOf(hist_key, 16);
+			SecretKeySpec secretkeyspec = new SecretKeySpec(hist_key,"AES");
+			Cipher cipher = Cipher.getInstance("AES");
+			cipher.init(Cipher.ENCRYPT_MODE, secretkeyspec);
+			byte[] hist_encrypted = cipher.doFinal(new String(hist_contents).getBytes());
+			
+			// Write history contents to file
+			fw.write(new String(hist_encrypted));
 		}
+		
+		// Test decryption
+		
 
 		return true;
 	}
@@ -180,7 +238,12 @@ public class SecLogin implements Runnable {
 
 		while(inputFile.hasNext()) {
 			String nextLine = inputFile.nextLine();
-			boolean attempt = loginAttempt(nextLine);
+			boolean attempt = false;
+			try {
+				attempt = loginAttempt(nextLine);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
 			System.out.println("Attempted login: " + (attempt ? "accept" : "failed"));
 		}
 	}
