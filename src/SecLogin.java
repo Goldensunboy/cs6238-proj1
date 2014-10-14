@@ -10,7 +10,10 @@ import java.net.Socket;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.regex.Pattern;
-
+import java.security.*;
+import java.math.*;
+import java.crypto.*;
+import javax.crypto.spec.SecretKeySpec;
 
 public class SecLogin implements Runnable {
 	
@@ -67,7 +70,56 @@ public class SecLogin implements Runnable {
 			a0 = a0.add(b);
 		}
 		System.out.println(a0);
+
 		return a0;
+	}
+	
+	private BigInteger calculate_hash(String password , int q, int x) {
+		// HmacSHA1 for G(x) - Key is the password (user input) supplied in file  
+					try {
+				        Mac mac = Mac.getInstance("HmacSHA1");
+				        SecretKeySpec secret=new SecretKeySpec(password.getBytes(),mac.getAlgorithm());
+				        mac.init(secret);
+				     //   String input = new String("2");
+				        String input = toString(x);
+				        
+				        byte[] rawHmac = mac.doFinal(input.getBytes());
+				        BigInteger Alpha1 = new BigInteger(1,rawHmac);
+				        
+				        System.out.println("Hash value is " +Alpha1);
+						}
+						catch (Exception e) {
+							System.out.println("Exception" + e);
+						}
+			        
+					Alpha1 = Alpha1.mod(q);
+			        return Alpha1;
+			        
+	}
+	
+	
+	private void Encrypt_Alpha_Beta(BigInteger[] Alpha, BigInteger[] Beta, String password) {
+		
+		try {
+		    MessageDigest md = MessageDigest.getInstance("SHA1");
+		    
+		    md.update(password.getBytes()); 
+		 	byte[] output = md.digest();
+		    output = Arrays.copyOf(output,16);
+		    
+		    String encrypt_value = new String ("prabhendu");
+		    
+		    SecretKeySpec secretkeyspec = new SecretKeySpec(output,"AES");
+		    Cipher cipher = Cipher.getInstance("AES");
+		    cipher.init(Cipher.ENCRYPT_MODE, secretkeyspec);
+		    byte[] encrypted = cipher.doFinal((encrypt_value.getBytes()));
+		    BigInteger test3 = new BigInteger(1,output);
+		    System.out.println("encrypted string: " + test3 + "-" + output);
+		 } 
+		catch (Exception e) {
+		    System.out.println("Exception: "+e);
+		 }		
+		
 	}
 	
 	/**
@@ -76,7 +128,7 @@ public class SecLogin implements Runnable {
 	 * @return Whether or not the user was authenticated
 	 */
 	private boolean loginAttempt(String credentials) {
-		
+
 		// Parse login string
 		String[] vals = credentials.split(" ");
 		int seqNum = Integer.parseInt(vals[0]);
@@ -85,6 +137,12 @@ public class SecLogin implements Runnable {
 		for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 			features[i] = Integer.parseInt(vals[i + 2]);
 		}
+		
+		// Get pasword from the user
+		Scanner in = new Scanner(System.in);
+		System.out.println("Enter password for user " + name);
+		String password = in.nextLine();
+		
 		
 		// If new user, do init
 		if(!new File(name + ".hist").exists()) {
@@ -97,7 +155,31 @@ public class SecLogin implements Runnable {
 				coeff[i] = Math.abs(rand.nextInt());
 			}
 			
-			BigInteger y = calculatePoly(hpwd, coeff, 2);
+			Biginteger y = new BigInteger;
+			BigInteger Alpha1 = new BigInteger;
+			BigInteger Beta1 = new BigInteger;
+			BigInteger[] Alpha = new BigInteger[DIST_FEAT_CNT];
+			BigInteger[] Beta = new BigInteger[DIST_FEAT_CNT];
+			
+//Calculation of Alpha values for instruction table				
+			for(int i = 1; i <= DIST_FEAT_CNT ; ++i ) {
+			    y = calculatePoly(hpwd, coeff, 2*i);
+				Alpha1 = calculate_hash(password, q, 2*i);
+				Alpha1 = Alpha1.add(y);
+				Alpha[i-1] = Alpha1;
+			}
+			
+//Calculation of Beta values for instruction table
+			for(int i = 1; i <= DIST_FEAT_CNT ; ++i ) {
+			    y = calculatePoly(hpwd, coeff, 2*i + 1);
+				Beta1 = calculate_hash(password, q, 2*i + 1);
+				Beta1 = Beta1.add(y);
+				Beta[i-1] = Beta1;
+			}
+		    
+			
+			Encrypt_alpha_beta(Alpha, Beta, password);
+	        
 		}
 		
 		return true;
