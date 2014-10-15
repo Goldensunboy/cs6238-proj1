@@ -24,6 +24,8 @@ import javax.crypto.spec.SecretKeySpec;
 
 public class SecLogin implements Runnable {
 
+	static volatile boolean ALWAYS_WRITE_INIT_FILES = true;
+	
 	/** Size of user history files */
 	private static final int HIST_SIZE = 8 << 10; // 8KB
 	
@@ -38,9 +40,10 @@ public class SecLogin implements Runnable {
 	
 	/** History file magic text */
 	private static final String HIST_TEXT = "This is a history file.";
+	private static final String AB_TEXT = "This is the alpha beta file.";
 	
 	/** Threshhold value for feature vectors */
-	private static int[] THRESH;
+	private static int[] THRESH = new int[15];
 	static {
 		for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 			THRESH[i] = 500;
@@ -127,8 +130,6 @@ public class SecLogin implements Runnable {
 			e.printStackTrace();
 		}
 	}
-
-	static volatile boolean b__ = true;
 	
 	/**
 	 * Attempt to log in
@@ -166,7 +167,7 @@ public class SecLogin implements Runnable {
 		String password = in.nextLine();
 
 		// If new user, do init
-		if(!new File(name + ".hist").exists() || b__) {
+		if(!new File(name + ".hist").exists() || ALWAYS_WRITE_INIT_FILES) {
 
 			// Create random vector
 			BigInteger q = new BigInteger(160, Integer.MAX_VALUE, new Random());
@@ -196,6 +197,10 @@ public class SecLogin implements Runnable {
 				Beta1 = Beta1.add(y);
 				Beta[i-1] = Beta1;
 			}
+			
+			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+				System.out.printf("Alpha:\t%s\nBeta:\t%s\n", Alpha[i], Beta[i]);
+			}
 
 			// Create history file contents
 			CharArrayWriter caw = new CharArrayWriter(HIST_SIZE);
@@ -218,35 +223,123 @@ public class SecLogin implements Runnable {
 			
 			// Write history contents to file
 			fos.write(hist_encrypted);
+			
+			// Create alpha and beta file contents
+			caw = new CharArrayWriter(HIST_SIZE);
+			pw = new PrintWriter(caw);
+			pw.write(AB_TEXT + "\n");
+			pw.write(q + "\n");
+			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+				pw.write(Alpha[i] + "\n");
+				pw.write(Beta[i] + "\n");
+			}
+			fos = new FileOutputStream(name + ".ab");
+			
+			// Encrypt alpha beta file contents
+			char[] ab_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE);
+			byte[] ab_key = password.getBytes();
+			ab_key = Arrays.copyOf(ab_key, 16);
+			secretkeyspec = new SecretKeySpec(ab_key,"AES");
+			cipher = Cipher.getInstance("AES");
+			cipher.init(Cipher.ENCRYPT_MODE, secretkeyspec);
+			byte[] ab_encrypted = cipher.doFinal(new String(ab_contents).getBytes());
+			
+			// Write contents to alpha beta file
+			fos.write(ab_encrypted);
+		}
+		
+		// Open alpha beta file for this login attempt
+		Path ab_path = Paths.get(name + ".ab");
+		byte[] ab_bytes = Files.readAllBytes(ab_path);
+		System.out.printf("ab_bytes size: %d\n", ab_bytes.length);
+		byte[] ab_key = password.getBytes();
+		ab_key = Arrays.copyOf(ab_key, 16);
+		SecretKeySpec secretkeyspec = new SecretKeySpec(ab_key,"AES");
+		Cipher cipher = Cipher.getInstance("AES");
+		String ab_decrypted_string = null;
+		try {
+			cipher.init(Cipher.DECRYPT_MODE, secretkeyspec);
+			byte[] ab_decrypted = cipher.doFinal(ab_bytes);
+			ab_decrypted_string = new String(ab_decrypted);
+		} catch (BadPaddingException e) {
+			// Login failed
+			return false;
+		}
+		
+		// Verify that the password was correct
+		Scanner ab_file_scanner = new Scanner(ab_decrypted_string);
+		String ab_magic_text = ab_file_scanner.nextLine();
+		System.out.println("ab Magic text: " + ab_magic_text);
+		if(!AB_TEXT.equals(ab_magic_text)) {
+			return false;
+		}
+		
+		// Retrieve Alpha and Beta values
+		BigInteger q = new BigInteger(ab_file_scanner.nextLine());
+		BigInteger[] Alpha = new BigInteger[DIST_FEAT_CNT],
+				     Beta  = new BigInteger[DIST_FEAT_CNT];
+		for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+			Alpha[i] = new BigInteger(ab_file_scanner.nextLine());
+			Beta[i] = new BigInteger(ab_file_scanner.nextLine());
 		}
 		
 		// Calculate hpwd
-		
+		BigInteger[] X = new BigInteger[DIST_FEAT_CNT],
+		             Y = new BigInteger[DIST_FEAT_CNT];
+		for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+			if (features[i] < THRESH[i]) {
+				Y[i] = Alpha[i].subtract(calculate_hash(password, q, 2*(i+1)));
+				X[i] = BigInteger.valueOf(2*(i+1));
+			} else {
+				Y[i] = Alpha[i].subtract(calculate_hash(password, q, 2*(i+1) + 1));
+				X[i] = BigInteger.valueOf(2*(i+1) + 1);
+			}
+		}
+		BigInteger hpwd_new = new BigInteger("0"), lambda;
+		for (int i = 0; i < DIST_FEAT_CNT ; ++i) {
+			lambda = new BigInteger("1");
+			for(int j = 0; j < DIST_FEAT_CNT; ++j) {
+				if(i != j) {
+					lambda = lambda.multiply(X[j].divide(X[j].subtract(X[i])));
+					lambda = lambda.mod(q);
+				}
+			}
+			hpwd_new = hpwd_new.add(Y[i].multiply(lambda));
+		}
+		hpwd_new = hpwd_new.mod(q);
 		
 		// Open the history file for this login attempt
 		Path hist_path = Paths.get(name + ".hist");
 		byte[] hist_bytes = Files.readAllBytes(hist_path);
 		System.out.printf("Hist_bytes size: %d\n", hist_bytes.length);
-		byte[] hist_key = hpwd1.toByteArray();
+		byte[] hist_key = hpwd_new.toByteArray();
 		hist_key = Arrays.copyOf(hist_key, 16);
-		SecretKeySpec secretkeyspec = new SecretKeySpec(hist_key,"AES");
-		Cipher cipher = Cipher.getInstance("AES");
-		cipher.init(Cipher.DECRYPT_MODE, secretkeyspec);
-		byte[] hist_decrypted = cipher.doFinal(hist_bytes);
-		String hist_decrypted_string = new String(hist_decrypted);
+		secretkeyspec = new SecretKeySpec(hist_key,"AES");
+		cipher = Cipher.getInstance("AES");
+		String hist_decrypted_string = null;
+		try {
+			cipher.init(Cipher.DECRYPT_MODE, secretkeyspec);
+			byte[] hist_decrypted = cipher.doFinal(hist_bytes);
+			hist_decrypted_string = new String(hist_decrypted);
+		} catch (BadPaddingException e) {
+			// Could not decrypt history file with hpwd'
+			System.err.println("Could not decrpyt historiy file with hpwd\'");
+			return false;
+		}
 		
 		// Verify that the password was correct
 		Scanner hist_file_scanner = new Scanner(hist_decrypted_string);
-		String magic_text = hist_file_scanner.nextLine();
-		if(!HIST_TEXT.equals(magic_text)) {
+		String hist_magic_text = hist_file_scanner.nextLine();
+		if(!HIST_TEXT.equals(hist_magic_text)) {
 			return false;
 		}
 
-		// 
 		
 		
 		
 		
+		ab_file_scanner.close();
+		hist_file_scanner.close();
 		return true; 
 	}
 
