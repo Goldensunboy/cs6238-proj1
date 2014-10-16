@@ -246,8 +246,9 @@ public class SecLogin implements Runnable {
 			
 			// Write contents to alpha beta file
 			fos.write(ab_encrypted);
-		}
+		}  // finish of main if statement
 		
+		else {
 		// Open alpha beta file for this login attempt
 		Path ab_path = Paths.get(name + ".ab");
 		byte[] ab_bytes = Files.readAllBytes(ab_path);
@@ -301,7 +302,7 @@ public class SecLogin implements Runnable {
 			for(int j = 0; j < DIST_FEAT_CNT; ++j) {
 				if(i != j) {
 					lambda = lambda.multiply(X[j].divide(X[j].subtract(X[i])));
-					lambda = lambda.mod(q);
+					//lambda = lambda.mod(q);
 				}
 			}
 			hpwd_new = hpwd_new.add(Y[i].multiply(lambda));
@@ -333,15 +334,12 @@ public class SecLogin implements Runnable {
 		if(!HIST_TEXT.equals(hist_magic_text)) {
 			return false;
 		}
-
-		
-		
-		
 		
 		ab_file_scanner.close();
 		hist_file_scanner.close();
+		} // finish of main else statement
 		return true; 
-	}
+	} // finish of boolean function..
 
 	/**
 	 * Server function. It will have already connected to a client
