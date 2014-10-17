@@ -24,7 +24,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 public class SecLogin implements Runnable {
 
-	static volatile boolean ALWAYS_WRITE_INIT_FILES = true;
+	static volatile boolean ALWAYS_WRITE_INIT_FILES = false;
 	
 	/** Size of user history files */
 	private static final int HIST_SIZE = 8 << 10; // 8KB
@@ -57,12 +57,15 @@ public class SecLogin implements Runnable {
 	 * @param x The value of the polynomial variable
 	 * @return The summed polynomial
 	 */
-	private BigInteger calculatePoly(BigInteger hpwd, int[] coeff, int x) {
-		BigInteger a0 = new BigInteger(hpwd.toString());
+	private BigInteger calculatePoly(BigInteger hpwd, BigInteger[] coeff, int x) {
+		//BigInteger a0 = new BigInteger(hpwd.toString());
+		//prabs testing
+		BigInteger a0 = hpwd;
 //		System.out.println(a0);
 		for(int i = 1; i < DIST_FEAT_CNT; ++i) {
 			BigInteger xval = BigInteger.valueOf(x);
-			BigInteger aval = BigInteger.valueOf(coeff[i - 1]);
+			//BigInteger aval = BigInteger.valueOf(coeff[i - 1]);
+			BigInteger aval = coeff[i - 1];
 			BigInteger b = xval.pow(i).multiply(aval);
 			a0 = a0.add(b);
 		}
@@ -171,13 +174,19 @@ public class SecLogin implements Runnable {
 
 			// Create random vector
 			BigInteger q = new BigInteger(160, Integer.MAX_VALUE, new Random());
+			System.out.println("prabs q " + q);
+			System.out.println("length in bits of q " + q.bitLength());
 			BigInteger hpwd = new BigInteger(256, Integer.MAX_VALUE, new Random()).mod(q);
-			int[] coeff = new int[DIST_FEAT_CNT - 1];
+			System.out.println("prabs hpwd " + hpwd);
+			System.out.println("length in bits of hpwd " + hpwd.bitLength());
+			BigInteger[] coeff = new BigInteger[DIST_FEAT_CNT - 1];
 			for(int i = 0; i < DIST_FEAT_CNT - 1; ++i) {
-				coeff[i] = Math.abs(rand.nextInt());
+				//coeff[i] = Math.abs(rand.nextInt());
+				coeff[i] = new BigInteger(159, Integer.MAX_VALUE, new Random());
+				coeff[i] = new BigInteger(""+i);
 			}
 
-			hpwd1 = hpwd;
+			//hpwd1 = hpwd;
 			BigInteger y, Alpha1, Beta1;
 			BigInteger[] Alpha = new BigInteger[DIST_FEAT_CNT];
 			BigInteger[] Beta = new BigInteger[DIST_FEAT_CNT];
@@ -186,7 +195,8 @@ public class SecLogin implements Runnable {
 			for(int i = 1; i <= DIST_FEAT_CNT ; ++i ) {
 				y = calculatePoly(hpwd, coeff, 2*i);
 				Alpha1 = calculate_hash(password, q, 2*i);
-				Alpha1 = Alpha1.add(y);
+				Alpha1 = Alpha1.multiply(y);  // modifying as per new paper
+				//Alpha1 = Alpha1.mod(q);
 				Alpha[i-1] = Alpha1;
 			}
 
@@ -194,7 +204,8 @@ public class SecLogin implements Runnable {
 			for(int i = 1; i <= DIST_FEAT_CNT ; ++i ) {
 				y = calculatePoly(hpwd, coeff, 2*i + 1);
 				Beta1 = calculate_hash(password, q, 2*i + 1);
-				Beta1 = Beta1.add(y);
+				Beta1 = Beta1.multiply(y);  // modifying as per new paper
+				//Beta1 = Beta1.mod(q);
 				Beta[i-1] = Beta1;
 			}
 			
@@ -289,10 +300,12 @@ public class SecLogin implements Runnable {
 		             Y = new BigInteger[DIST_FEAT_CNT];
 		for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 			if (features[i] < THRESH[i]) {
-				Y[i] = Alpha[i].subtract(calculate_hash(password, q, 2*(i+1)));
+				Y[i] = Alpha[i].divide(calculate_hash(password, q, 2*(i+1)));  // modifying as per new paper
+				//Y[i] = Y[i].mod(q);
 				X[i] = BigInteger.valueOf(2*(i+1));
 			} else {
-				Y[i] = Alpha[i].subtract(calculate_hash(password, q, 2*(i+1) + 1));
+				Y[i] = Alpha[i].divide(calculate_hash(password, q, 2*(i+1) + 1));  // modifying as per new paper
+				//Y[i] = Y[i].mod(q);
 				X[i] = BigInteger.valueOf(2*(i+1) + 1);
 			}
 		}
@@ -302,12 +315,15 @@ public class SecLogin implements Runnable {
 			for(int j = 0; j < DIST_FEAT_CNT; ++j) {
 				if(i != j) {
 					lambda = lambda.multiply(X[j].divide(X[j].subtract(X[i])));
-					//lambda = lambda.mod(q);
-				}
+				}				
 			}
+			//lambda = lambda.mod(q);
+			
 			hpwd_new = hpwd_new.add(Y[i].multiply(lambda));
 		}
 		hpwd_new = hpwd_new.mod(q);
+		
+		System.out.println("Calculated hardened password is " + hpwd_new);
 		
 		// Open the history file for this login attempt
 		Path hist_path = Paths.get(name + ".hist");
