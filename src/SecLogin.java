@@ -2,8 +2,10 @@ import java.io.CharArrayWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,8 +24,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 public class SecLogin implements Runnable {
 
-	/** Always write the history file per user on login (for testing) */
-	private static volatile boolean ALWAYS_WRITE_INIT_FILES = false;
+	static volatile boolean ALWAYS_WRITE_INIT_FILES = false;
 	
 	/** Size of user history files */
 	private static final int HIST_SIZE = 8 << 10; // 8KB
@@ -56,14 +57,21 @@ public class SecLogin implements Runnable {
 	 * @param x The value of the polynomial variable
 	 * @return The summed polynomial
 	 */
-	private BigInteger calculatePoly(BigInteger hpwd, BigInteger[] coeff, int x) {
+	private BigInteger calculatePoly(BigInteger hpwd, int[] coeff, int x) {
+		//BigInteger a0 = new BigInteger(hpwd.toString());
+		//prabs testing
 		BigInteger a0 = hpwd;
+//		System.out.println(a0);
 		for(int i = 1; i < DIST_FEAT_CNT; ++i) {
 			BigInteger xval = BigInteger.valueOf(x);
-			BigInteger aval = coeff[i - 1];
-			BigInteger b = xval.pow(i).multiply(aval);
+			BigInteger aval = BigInteger.valueOf(coeff[i - 1]);
+			//BigInteger aval = coeff[i - 1];
+			BigInteger b = xval.pow(i);
+			b = b.multiply(aval);
 			a0 = a0.add(b);
 		}
+//		System.out.println(a0);
+
 		return a0;
 	}
 
@@ -75,15 +83,19 @@ public class SecLogin implements Runnable {
 	 * @return The completed calculation of Gr(x) mod q
 	 */
 	private BigInteger calculate_hash(String password , BigInteger q, int x) {
+		// HmacSHA1 for G(x) - Key is the password (user input) supplied in file 
 		BigInteger Alpha1 = null;
 		try {
 			Mac mac = Mac.getInstance("HmacSHA1");
 			SecretKeySpec secret=new SecretKeySpec(password.getBytes(),mac.getAlgorithm());
 			mac.init(secret);
+			//   String input = new String("2");
 			String input =  "" + x;
 
 			byte[] rawHmac = mac.doFinal(input.getBytes());
 			Alpha1 = new BigInteger(1,rawHmac);
+
+//			System.out.println("Hash value is " + Alpha1);
 		}
 		catch (Exception e) {
 			e.printStackTrace();
@@ -99,7 +111,7 @@ public class SecLogin implements Runnable {
 	 * @param Alpha Alpha array
 	 * @param Beta Beta array
 	 * @param password User's password, used as the encryption key
-	 *
+	 */
 	private void Encrypt_Alpha_Beta(BigInteger[] Alpha, BigInteger[] Beta, String password) {
 
 		try {
@@ -121,7 +133,7 @@ public class SecLogin implements Runnable {
 		catch (Exception e) {
 			e.printStackTrace();
 		}
-	}*/
+	}
 	
 	/**
 	 * Attempt to log in
@@ -141,8 +153,9 @@ public class SecLogin implements Runnable {
 			NoSuchPaddingException,
 			InvalidKeyException,
 			IOException {
+
+		//testing hpwd outside
 		BigInteger hpwd1 = null;
-		
 		// Parse login string
 		String[] vals = credentials.split(" ");
 		int seqNum = Integer.parseInt(vals[0]);
@@ -161,17 +174,20 @@ public class SecLogin implements Runnable {
 		if(!new File(name + ".hist").exists() || ALWAYS_WRITE_INIT_FILES) {
 
 			// Create random vector
-			BigInteger q = new BigInteger(160, Integer.MAX_VALUE, new Random());
+			BigInteger q = new BigInteger(5, Integer.MAX_VALUE, new Random());
 			System.out.println("prabs q " + q);
 			System.out.println("length in bits of q " + q.bitLength());
-			BigInteger hpwd = new BigInteger(256, Integer.MAX_VALUE, new Random()).mod(q);
+			BigInteger hpwd = new BigInteger(7, Integer.MAX_VALUE, new Random()).mod(q);
 			System.out.println("prabs hpwd " + hpwd);
 			System.out.println("length in bits of hpwd " + hpwd.bitLength());
-			BigInteger[] coeff = new BigInteger[DIST_FEAT_CNT - 1];
+			int[] coeff = new int[DIST_FEAT_CNT - 1];
 			for(int i = 0; i < DIST_FEAT_CNT - 1; ++i) {
-				coeff[i] = new BigInteger(159, Integer.MAX_VALUE, new Random());
-				coeff[i] = new BigInteger("" + i);
+				//coeff[i] = Math.abs(rand.nextInt());
+				//coeff[i] = new BigInteger(159, Integer.MAX_VALUE, new Random());
+				coeff[i] = 123 + i;
 			}
+
+			//hpwd1 = hpwd;
 			BigInteger y, Alpha1, Beta1;
 			BigInteger[] Alpha = new BigInteger[DIST_FEAT_CNT];
 			BigInteger[] Beta = new BigInteger[DIST_FEAT_CNT];
@@ -180,8 +196,8 @@ public class SecLogin implements Runnable {
 			for(int i = 1; i <= DIST_FEAT_CNT ; ++i ) {
 				y = calculatePoly(hpwd, coeff, 2*i);
 				Alpha1 = calculate_hash(password, q, 2*i);
-				Alpha1 = Alpha1.multiply(y);  // modifying as per new paper
-				// mod q
+				Alpha1 = Alpha1.add(y);  // modifying as per new paper
+				//Alpha1 = Alpha1.mod(q);
 				Alpha[i-1] = Alpha1;
 			}
 
@@ -189,8 +205,8 @@ public class SecLogin implements Runnable {
 			for(int i = 1; i <= DIST_FEAT_CNT ; ++i ) {
 				y = calculatePoly(hpwd, coeff, 2*i + 1);
 				Beta1 = calculate_hash(password, q, 2*i + 1);
-				Beta1 = Beta1.multiply(y);  // modifying as per new paper
-				// mod q
+				Beta1 = Beta1.add(y);  // modifying as per new paper
+				//Beta1 = Beta1.mod(q);
 				Beta[i-1] = Beta1;
 			}
 			
@@ -285,11 +301,11 @@ public class SecLogin implements Runnable {
 		             Y = new BigInteger[DIST_FEAT_CNT];
 		for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 			if (features[i] < THRESH[i]) {
-				Y[i] = Alpha[i].divide(calculate_hash(password, q, 2*(i+1)));  // modifying as per new paper
+				Y[i] = Alpha[i].subtract(calculate_hash(password, q, 2*(i+1)));  // modifying as per new paper
 				//Y[i] = Y[i].mod(q);
 				X[i] = BigInteger.valueOf(2*(i+1));
 			} else {
-				Y[i] = Alpha[i].divide(calculate_hash(password, q, 2*(i+1) + 1));  // modifying as per new paper
+				Y[i] = Alpha[i].subtract(calculate_hash(password, q, 2*(i+1) + 1));  // modifying as per new paper
 				//Y[i] = Y[i].mod(q);
 				X[i] = BigInteger.valueOf(2*(i+1) + 1);
 			}
@@ -297,16 +313,19 @@ public class SecLogin implements Runnable {
 		BigInteger hpwd_new = new BigInteger("0"), lambda;
 		for (int i = 0; i < DIST_FEAT_CNT ; ++i) {
 			lambda = new BigInteger("1");
+			System.out.println("prabs lambda1 " + lambda);
 			for(int j = 0; j < DIST_FEAT_CNT; ++j) {
 				if(i != j) {
 					lambda = lambda.multiply(X[j].divide(X[j].subtract(X[i])));
 				}				
 			}
 			//lambda = lambda.mod(q);
-			
-			hpwd_new = hpwd_new.add(Y[i].multiply(lambda));
+			System.out.println("prabs lamda " + lambda);
+			hpwd_new = hpwd_new.add(Y[i]/*.multiply(lambda)*/);
+			System.out.println("prabs hpwd_new " + hpwd_new);
 		}
 		hpwd_new = hpwd_new.mod(q);
+		System.out.println("prabs hpwd_new1 " + hpwd_new);
 		
 		System.out.println("Calculated hardened password is " + hpwd_new);
 		
