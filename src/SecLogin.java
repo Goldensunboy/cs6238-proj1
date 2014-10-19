@@ -3,7 +3,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,6 +38,12 @@ public class SecLogin {
 	private static final BigInteger q =
 			new BigInteger("957117109103230102421885836974304804951875593197");
 	
+	/** Static k */
+	private static final double k = 0.1;
+	
+	/** Number of logins for sampling user keystroke dynamics */
+	private static final int n = 8;
+	
 	/** Distinguishing feature count */
 	private static final int DIST_FEAT_CNT = 15;
 	
@@ -58,13 +63,24 @@ public class SecLogin {
 	private static void parseMain(String filename) {
 		try (Scanner in = new Scanner(System.in)) {
 			Scanner file_scan = new Scanner(new File(filename));
+			
+			// Create an 8-character password
+			char[] pass_chars = new char[] {
+				'p', 'a', 's', 's', 'w', 'o', 'r', 'd'
+			};
+			System.out.print("Password for this series of logins: ");
+			String password = in.nextLine();
+			for(int i = 0; i < Math.min(8, password.length()); ++i) {
+				pass_chars[i] = password.charAt(i);
+			}
+			password = new String(pass_chars);
+			
+			// Attempt a login for each line in the input file
 			while(file_scan.hasNext()) {
 				LoginFeatures lf = new LoginFeatures(file_scan.nextLine().split(" "));
-				System.out.printf("Password for %s: ", lf.username);
-				String password = in.nextLine();
 				boolean attempt = loginAttempt(lf, password);
-				System.out.printf("Login attempt for %s: %s\n",
-						lf.username, attempt ? "success" : "failed");
+				System.out.printf("Login attempt %d: %s\n",
+						lf.seqnum, attempt ? "success" : "failed");
 			}
 			file_scan.close();
 		} catch (Exception e) {
@@ -143,8 +159,6 @@ public class SecLogin {
 			// Create new hardened password
 			hpwd = new BigInteger(VAR_PREC, Integer.MAX_VALUE, rand);
 			
-			System.out.println("hpwd_org: " + hpwd);
-			
 			// Create coefficients for polynomial
 			BigInteger[] coeff = new BigInteger[DIST_FEAT_CNT];
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
@@ -180,7 +194,7 @@ public class SecLogin {
 			FileOutputStream fos = new FileOutputStream(lf.username + ".hist");
 			
 			// Encrypt history file contents
-			char[] hist_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE);
+			char[] hist_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE - 1);
 			byte[] hist_key = hpwd.toByteArray();
 			hist_key = Arrays.copyOf(hist_key, 16);
 			SecretKeySpec secretkeyspec = new SecretKeySpec(hist_key,"AES");
@@ -235,19 +249,13 @@ public class SecLogin {
 			
 			// Calculate hpwd'
 			BigInteger hpwd_sum = new BigInteger("0");
-			BigDecimal hpwd_sum_dec = new BigDecimal("0.0");
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				hpwd_sum = hpwd_sum.add(lambda[i]).mod(q);
 			}
 			
-			System.out.println("hpwd_new:     " + hpwd_sum);
-			System.out.println("length of hpwd_new " + hpwd_sum.bitLength());
-			System.out.println("hpwd_new_dec: " + hpwd_sum_dec);
-			
 			// Open the history file for this login attempt
 			Path hist_path = Paths.get(lf.username + ".hist");
 			byte[] hist_bytes = Files.readAllBytes(hist_path);
-			System.out.printf("Hist_bytes size: %d\n", hist_bytes.length);
 			byte[] hist_key = hpwd_sum.toByteArray();
 			hist_key = Arrays.copyOf(hist_key, 16);
 			SecretKeySpec secretkeyspec = new SecretKeySpec(hist_key,"AES");
@@ -259,7 +267,7 @@ public class SecLogin {
 				hist_decrypted_string = new String(hist_decrypted);
 			} catch (BadPaddingException e) {
 				// Could not decrypt history file with hpwd'
-				System.err.println("Could not decrypt history file with hpwd\'");
+				//System.err.println("Could not decrypt history file with hpwd\'");
 				return false;
 			}
 			
@@ -284,7 +292,6 @@ public class SecLogin {
 				feat_arr[i] = new LoginFeatures(feat_args);
 			}
 			hist_file_scanner.close();
-			new File(lf.username + ".hist").delete();
 			
 			// Calculate feature means
 			double[] feat_means = new double[DIST_FEAT_CNT];
@@ -293,7 +300,8 @@ public class SecLogin {
 				for(int j = 0; j < login_count; ++j) {
 					sum += feat_arr[j].features[i];
 				}
-				feat_means[i] = (double) sum / login_count;
+				sum += lf.features[i];
+				feat_means[i] = (double) sum / (login_count + 1);
 			}
 			
 			// Calculate feature standard deviations
@@ -304,34 +312,74 @@ public class SecLogin {
 					double dif = feat_arr[j].features[i] - feat_means[i];
 					sqdif_sum += dif * dif;
 				}
-				feat_devs[i] = Math.sqrt(sqdif_sum);
+				double dif = lf.features[i] - feat_means[i];
+				sqdif_sum += dif * dif;
+				double sqdif_avg = sqdif_sum / (login_count + 1);
+				feat_devs[i] = Math.sqrt(sqdif_avg);
 			}
 			
-			// TODO Calculate new random values for alpha beta file
+			// Create new random coefficients for polynomial after successful login
+			BigInteger[] coeff = new BigInteger[DIST_FEAT_CNT];
+			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+				coeff[i] = new BigInteger(VAR_PREC, 0, rand);
+			}
 			
-			// TEST
-			System.out.println("Logins in history file: " + login_count + "\n");
-			System.out.println("Logins:");
-			for(int i = 0; i < login_count; ++i) {
-				for(int j = 0; j < DIST_FEAT_CNT; ++j) {
-					System.out.print("\t" + feat_arr[i].features[j]);
-					System.out.print(j == DIST_FEAT_CNT - 1 ? "\n" : "");
+			// Calculating new alpha and beta values
+			BigInteger y1, y2, gr_pwd1, gr_pwd2;
+			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+				if(Math.abs(feat_means[i] - (double) THRESH) > k * feat_devs[i] &&
+						login_count > n) {
+					if (feat_means[i] < (double) THRESH) {
+					    y1 = calculatePoly(hpwd_sum, coeff, (i + 1) << 1);
+						y2 = new BigInteger(VAR_PREC, 0, rand);
+						
+					} else {
+						y1 = new BigInteger(VAR_PREC, 0, rand);
+						y2 = calculatePoly(hpwd_sum, coeff, ((i + 1) << 1) + 1);
+					}
+				} else {
+					y1 = calculatePoly(hpwd_sum, coeff, (i + 1) << 1);
+					y2 = calculatePoly(hpwd_sum, coeff, ((i + 1) << 1) + 1);
 				}
+				gr_pwd1  = calculate_hash(password, (i + 1) << 1);
+				alpha[i] = y1.multiply(gr_pwd1.mod(q));
+				gr_pwd2  = calculate_hash(password, ((i + 1) << 1) + 1);
+				beta[i]  = y2.multiply(gr_pwd2.mod(q));
 			}
-			System.out.println("\nMeans:");
+			
+			// Create new instruction table file
+			new File(lf.username + ".ab").delete();
+			PrintWriter pw = new PrintWriter(new File(lf.username + ".ab"));
+			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
+				pw.write(alpha[i] + "\n");
+				pw.write(beta[i] + "\n");
+			}
+			pw.close();
+			
+//			// TEST
+//			System.out.println("Logins in history file: " + login_count + "\n");
+//			System.out.println("Logins:");
+//			for(int i = 0; i < login_count; ++i) {
+//				for(int j = 0; j < DIST_FEAT_CNT; ++j) {
+//					System.out.print("\t" + feat_arr[i].features[j]);
+//					System.out.print(j == DIST_FEAT_CNT - 1 ? "\n" : "");
+//				}
+//			}
+			System.out.println("\tMeans:");
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				System.out.print("\t" + (int) feat_means[i]);
 				System.out.print(i == DIST_FEAT_CNT - 1 ? "\n" : "");
 			}
-			System.out.println("\nDevs:");
+			System.out.println("\tDevs:");
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				System.out.printf("\t%3.3f", feat_devs[i]);
 				System.out.print(i == DIST_FEAT_CNT - 1 ? "\n" : "");
 			}
 			
 			// Create new history file
+			new File(lf.username + ".hist").delete();
 			CharArrayWriter caw = new CharArrayWriter(HIST_SIZE);
-			PrintWriter pw = new PrintWriter(caw);
+			pw = new PrintWriter(caw);
 			pw.write(HIST_TEXT + "\n");
 			pw.write(Math.min(login_count + 1, HIST_LIMIT) + "\n");
 			if(login_count < HIST_LIMIT) {
@@ -353,7 +401,7 @@ public class SecLogin {
 			FileOutputStream fos = new FileOutputStream(lf.username + ".hist");
 			
 			// Encrypt history file contents
-			char[] hist_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE);
+			char[] hist_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE - 1);
 			hist_key = hpwd_sum.toByteArray();
 			hist_key = Arrays.copyOf(hist_key, 16);
 			secretkeyspec = new SecretKeySpec(hist_key,"AES");
