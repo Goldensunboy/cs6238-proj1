@@ -131,7 +131,7 @@ public class SecLogin {
 		return a0;
 	}
 	
-	private static volatile boolean ERASE_FILES_ON_RUN = true;
+	private static volatile boolean ERASE_FILES_ON_RUN = false;
 	static {
 		if(ERASE_FILES_ON_RUN) {
 			new File("prabhendu.hist").delete();
