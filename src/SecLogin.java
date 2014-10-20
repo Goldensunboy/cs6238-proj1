@@ -89,11 +89,10 @@ public class SecLogin {
 	}
 	
 	/**
-	 * Perform Gr(x) mod q.
-	 * @param password What we are encrypting with SHA-1
-	 * @param q The modulus of the size we are allowing the output to be
+	 * Perform Gr(x).
+	 * @param password What we are encrypting with HmacSHA-1
 	 * @param x Seed for the SHA-1 digest
-	 * @return The completed calculation of Gr(x) mod q
+	 * @return The completed calculation of Gr(x)
 	 */
 	private static BigInteger calculate_hash(String password, int x) {
 		// HmacSHA1 for G(x) - Key is the password (user input) supplied in file 
@@ -143,7 +142,7 @@ public class SecLogin {
 	 * Attempt to log in
 	 * @param lf Features for this login attempt
 	 * @return Whether or not the login was successful
-	 * @throws IOException 
+	 * @throws Exception 
 	 */
 	private static boolean loginAttempt(LoginFeatures lf, String password) throws Exception {
 		
@@ -193,7 +192,7 @@ public class SecLogin {
 			}
 			FileOutputStream fos = new FileOutputStream(lf.username + ".hist");
 			
-			// Encrypt history file contents
+			// Encrypt history file contents using hpwd - hardened password
 			char[] hist_contents = Arrays.copyOf(caw.toCharArray(), HIST_SIZE - 1);
 			byte[] hist_key = hpwd.toByteArray();
 			hist_key = Arrays.copyOf(hist_key, 16);
@@ -207,6 +206,7 @@ public class SecLogin {
 			fos.close();
 			
 		} else {
+			// Code part for subsequent logins (after initial login)
 			
 			// Retrieve alpha beta values for this login attempt
 			Scanner scan = new Scanner(new File(lf.username + ".ab"));
@@ -231,7 +231,7 @@ public class SecLogin {
 				}
 			}
 			
-			// Calculate lambda
+			// Calculate lambda - Lagrange's Coefficient
 			BigInteger[] lambda = new BigInteger[DIST_FEAT_CNT];
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				BigInteger lambda_num = new BigInteger("1"),
@@ -247,7 +247,7 @@ public class SecLogin {
 				lambda[i] = lambda[i].divide(lambda_den);
 			}
 			
-			// Calculate hpwd'
+			// Calculate hpwd' - new hardened password
 			BigInteger hpwd_sum = new BigInteger("0");
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				hpwd_sum = hpwd_sum.add(lambda[i]).mod(q);
@@ -271,7 +271,7 @@ public class SecLogin {
 				return false;
 			}
 			
-			// Verify that the password was correct
+			// Verify that the static string in history file retrieved is correct
 			Scanner hist_file_scanner = new Scanner(hist_decrypted_string);
 			String hist_magic_text = hist_file_scanner.nextLine();
 			if(!HIST_TEXT.equals(hist_magic_text)) {
@@ -293,7 +293,7 @@ public class SecLogin {
 			}
 			hist_file_scanner.close();
 			
-			// Calculate feature means
+			// Calculate feature means (includes the current feature values)
 			double[] feat_means = new double[DIST_FEAT_CNT];
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				int sum = 0;
@@ -304,7 +304,7 @@ public class SecLogin {
 				feat_means[i] = (double) sum / (login_count + 1);
 			}
 			
-			// Calculate feature standard deviations
+			// Calculate feature standard deviations (includes the current feature values)
 			double[] feat_devs = new double[DIST_FEAT_CNT];
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				double sqdif_sum = 0;
@@ -347,7 +347,7 @@ public class SecLogin {
 				beta[i]  = y2.multiply(gr_pwd2.mod(q));
 			}
 			
-			// Create new instruction table file
+			// Create new instruction table file with new alpha beta values
 			new File(lf.username + ".ab").delete();
 			PrintWriter pw = new PrintWriter(new File(lf.username + ".ab"));
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
@@ -355,16 +355,7 @@ public class SecLogin {
 				pw.write(beta[i] + "\n");
 			}
 			pw.close();
-			
-//			// TEST
-//			System.out.println("Logins in history file: " + login_count + "\n");
-//			System.out.println("Logins:");
-//			for(int i = 0; i < login_count; ++i) {
-//				for(int j = 0; j < DIST_FEAT_CNT; ++j) {
-//					System.out.print("\t" + feat_arr[i].features[j]);
-//					System.out.print(j == DIST_FEAT_CNT - 1 ? "\n" : "");
-//				}
-//			}
+
 			System.out.println("\tMeans:");
 			for(int i = 0; i < DIST_FEAT_CNT; ++i) {
 				System.out.print("\t" + (int) feat_means[i]);
